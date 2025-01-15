@@ -1,0 +1,3 @@
+Flask
+sqlfluff
+gunicorn
