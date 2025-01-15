@@ -9,6 +9,12 @@ app = Flask(__name__)
 # Variável de ambiente para o token do Slack
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 
+# Headers para chamadas da API do Slack
+HEADERS = {
+    "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+    "Content-Type": "application/json"
+}
+
 # Traduções específicas para mensagens relacionadas a UPDATE ou DELETE no PostgreSQL
 TRANSLATIONS = {
     "L016": "Use sempre uma cláusula WHERE ao fazer UPDATE ou DELETE para evitar alterações em massa.",
@@ -22,7 +28,7 @@ TRANSLATIONS = {
     "L031": "Certifique-se de que índices estão sendo usados corretamente ao filtrar em WHERE ou ao usar JOIN."
 }
 
-def process_query(query, response_url, thread_ts):
+def process_query(query, channel_id, response_url, thread_ts):
     """Processa a query em segundo plano, corrige e envia a resposta ao Slack na thread."""
     try:
         # Salva a query original em um arquivo temporário
@@ -68,40 +74,38 @@ def process_query(query, response_url, thread_ts):
             )
 
         # Envia a resposta ao Slack na thread
-        headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
         payload = {
-            "channel": data.get("channel_id"),
+            "channel": channel_id,
             "text": response_text,
             "thread_ts": thread_ts
         }
-        requests.post("https://slack.com/api/chat.postMessage", headers=headers, json=payload)
+        requests.post("https://slack.com/api/chat.postMessage", headers=HEADERS, json=payload)
 
     except Exception as e:
         error_message = f"🚨 Ocorreu um erro ao processar a query: {str(e)}"
-        headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
         payload = {
-            "channel": data.get("channel_id"),
+            "channel": channel_id,
             "text": error_message,
             "thread_ts": thread_ts
         }
-        requests.post("https://slack.com/api/chat.postMessage", headers=headers, json=payload)
+        requests.post("https://slack.com/api/chat.postMessage", headers=HEADERS, json=payload)
 
 @app.route('/slack', methods=['POST'])
 def handle_slack_event():
     data = request.form  # Slack envia os dados como 'form-urlencoded'
     query = data.get('text', '').strip()
     response_url = data.get('response_url')  # URL para responder ao Slack
-    user_name = data.get('user_name', 'Usuário')  # Nome do usuário que enviou o comando
-    thread_ts = data.get('thread_ts', data.get('ts'))  # Timestamp da thread
+    channel_id = data.get('channel_id')  # ID do canal
+    thread_ts = data.get('thread_ts', data.get('ts'))  # Timestamp da thread ou mensagem original
 
     # Resposta inicial com saudação amigável
     if not query:
-        return Response(f"Oi, {user_name}!\n⚠️ Nenhuma query SQL encontrada! Por favor, envie uma query válida.", status=200)
+        return Response("⚠️ Nenhuma query SQL encontrada! Por favor, envie uma query válida.", status=200)
 
-    # Envia mensagem inicial e processa a query em segundo plano
-    threading.Thread(target=process_query, args=(query, response_url, thread_ts)).start()
+    # Processa a query em segundo plano
+    threading.Thread(target=process_query, args=(query, channel_id, response_url, thread_ts)).start()
 
-    return Response(f"Oi, {user_name}! 🔄 Sua query está sendo analisada. Responderemos em instantes na thread.", status=200)
+    return Response("🔄 Sua query está sendo analisada. Responderemos em instantes na thread.", status=200)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
